@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.DS_Store
+resultados_etapa1/
+resultados_etapa2/
