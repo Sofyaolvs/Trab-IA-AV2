@@ -1,6 +1,6 @@
 """
 Etapa 1 - Classificacao Binaria: Spiral Dataset
-Modelos: Perceptron Simples, ADALINE, MLP, RBF
+Modelos: Perceptron Simples, ADALINE, MLP
 Bibliotecas permitidas: numpy, matplotlib, seaborn
 """
 
@@ -248,79 +248,6 @@ class MLP:
         return a
 
 
-class RBF:
-    """Rede RBF: K-Means para centros, pseudo-inversa + refinamento batch."""
-    def __init__(self, n_centers=10, lr=0.01, max_epochs=100, tol=1e-6):
-        self.n_centers = n_centers
-        self.lr = lr
-        self.max_epochs = max_epochs
-        self.tol = tol
-        self.centers = None
-        self.sigmas = None
-        self.weights = None
-        self.errors_per_epoch = []
-
-    def _kmeans(self, X, k, max_iter=100):
-        N = X.shape[0]
-        centers = X[np.random.choice(N, k, replace=False)].copy()
-        for _ in range(max_iter):
-            dists = np.linalg.norm(X[:, None] - centers[None, :], axis=2)  # (N, k)
-            labels = np.argmin(dists, axis=1)
-            new_c = np.array([X[labels == j].mean(axis=0) if np.any(labels == j) else centers[j]
-                              for j in range(k)])
-            if np.allclose(centers, new_c, atol=1e-6):
-                break
-            centers = new_c
-        return centers
-
-    def _compute_H(self, X):
-        N = X.shape[0]
-        H = np.zeros((N, self.n_centers))
-        for j in range(self.n_centers):
-            d2 = np.sum((X - self.centers[j]) ** 2, axis=1)
-            H[:, j] = np.exp(-d2 / (2 * self.sigmas[j] ** 2 + 1e-10))
-        return H
-
-    def fit(self, X, y):
-        N = X.shape[0]
-        if y.ndim == 1:
-            y = y.reshape(-1, 1)
-
-        self.centers = self._kmeans(X, self.n_centers)
-
-        # Sigma: distancia media aos 2 vizinhos mais proximos
-        dc = np.linalg.norm(self.centers[:, None] - self.centers[None, :], axis=2)
-        np.fill_diagonal(dc, np.inf)
-        self.sigmas = np.array([np.mean(np.sort(dc[j])[:min(2, self.n_centers - 1)])
-                                for j in range(self.n_centers)])
-        self.sigmas[self.sigmas == 0] = 1.0
-
-        H = self._compute_H(X)
-        Hb = np.hstack([H, np.ones((N, 1))])
-
-        # Pseudo-inversa
-        self.weights = np.linalg.pinv(Hb) @ y
-        pred = Hb @ self.weights
-        self.errors_per_epoch = [np.sum((y - pred) ** 2) / (2 * N)]
-
-        # Refinamento batch
-        for epoch in range(self.max_epochs):
-            out = Hb @ self.weights
-            err = y - out
-            eqm = np.sum(err ** 2) / (2 * N)
-            self.errors_per_epoch.append(eqm)
-            self.weights += (self.lr / N) * (Hb.T @ err)
-            if abs(self.errors_per_epoch[-1] - self.errors_per_epoch[-2]) < self.tol:
-                break
-
-    def predict(self, X):
-        H = self._compute_H(X)
-        Hb = np.hstack([H, np.ones((X.shape[0], 1))])
-        raw = Hb @ self.weights
-        if raw.shape[1] == 1:
-            return np.where(raw.flatten() >= 0, 1.0, -1.0)
-        return raw
-
 
 # ==============================================================================
 # 6. ANALISE DE UNDERFITTING E OVERFITTING (MLP e RBF)
@@ -371,36 +298,6 @@ for cname, params in mlp_configs.items():
     plot_cm(cm, ['Classe -1', 'Classe +1'], f"MLP {cname}",
             os.path.join(RESULTS_DIR, f"02_mlp_{cname}_cm.png"))
 
-# --- RBF ---
-rbf_configs = {
-    'underfitting': {'n_centers': 2,   'lr': 0.01, 'max_epochs': 50},
-    'adequado':     {'n_centers': 30,  'lr': 0.01, 'max_epochs': 100},
-    'overfitting':  {'n_centers': 150, 'lr': 0.01, 'max_epochs': 200},
-}
-
-print("\n--- RBF ---")
-for cname, params in rbf_configs.items():
-    np.random.seed(42)
-    t0 = time.time()
-    rbf = RBF(**params)
-    rbf.fit(X_train, y_train.reshape(-1, 1))
-
-    yp_tr = rbf.predict(X_train)
-    yp_te = rbf.predict(X_test)
-    m_tr = binary_metrics(y_train, yp_tr)
-    m_te = binary_metrics(y_test, yp_te)
-
-    print(f"\n  RBF [{cname}] - Centros: {params['n_centers']} ({time.time()-t0:.1f}s)")
-    print(f"    Treino -> Acc: {m_tr['acuracia']:.4f}")
-    print(f"    Teste  -> Acc: {m_te['acuracia']:.4f}, Sens: {m_te['sensibilidade']:.4f}, "
-          f"Spec: {m_te['especificidade']:.4f}")
-
-    plot_curve(rbf.errors_per_epoch, f"RBF {cname} - Curva de Aprendizado",
-               os.path.join(RESULTS_DIR, f"02_rbf_{cname}_curva.png"))
-    cm = confusion_matrix_manual(y_test, yp_te, [-1, 1])
-    plot_cm(cm, ['Classe -1', 'Classe +1'], f"RBF {cname}",
-            os.path.join(RESULTS_DIR, f"02_rbf_{cname}_cm.png"))
-
 
 # ==============================================================================
 # 7. VALIDACAO POR AMOSTRAGEM ALEATORIA - R=500 RODADAS
@@ -415,7 +312,6 @@ model_configs = {
     'ADALINE':            lambda: ADALINE(lr=0.1, max_epochs=50, tol=1e-6),
     'MLP':                lambda: MLP(hidden_layers=(20, 10), lr=0.05, max_epochs=100,
                                       activation='tanh', batch_size=64),
-    'RBF':                lambda: RBF(n_centers=25, lr=0.01, max_epochs=50),
 }
 
 results = {name: {m: [] for m in metrics_names} for name in model_configs}

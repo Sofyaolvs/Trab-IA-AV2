@@ -1,6 +1,6 @@
 """
 Etapa 2 - Classificacao Multiclasse: Reconhecimento Facial (20 classes)
-Modelos: Perceptron Simples, ADALINE, MLP, RBF
+Modelos: Perceptron Simples, ADALINE, MLP
 Bibliotecas permitidas: numpy, matplotlib, seaborn, opencv
 """
 
@@ -278,98 +278,6 @@ class MLP:
         return np.argmax(a, axis=1)
 
 
-# ---------- RBF (Multiclasse - Otimizado) ----------
-class RBF:
-    def __init__(self, n_centers=50, lr=0.001, max_epochs=100, tol=1e-6):
-        self.n_centers = n_centers
-        self.lr = lr
-        self.max_epochs = max_epochs
-        self.tol = tol
-        self.centers = None
-        self.sigmas = None
-        self.weights = None
-        self.errors_per_epoch = []
-
-    def _kmeans(self, X, k, max_iter=50):
-        N = X.shape[0]
-        idx = np.random.choice(N, k, replace=False)
-        centers = X[idx].copy()
-        for it in range(max_iter):
-            # Distancias vetorizadas em blocos para evitar memoria excessiva
-            labels = np.zeros(N, dtype=int)
-            block = 100
-            for s in range(0, N, block):
-                e = min(s + block, N)
-                diff = X[s:e, None, :] - centers[None, :, :]  # (block, k, p)
-                dists = np.sum(diff ** 2, axis=2)  # (block, k)
-                labels[s:e] = np.argmin(dists, axis=1)
-            new_centers = np.array([X[labels == j].mean(axis=0) if np.any(labels == j) else centers[j]
-                                    for j in range(k)])
-            if np.allclose(centers, new_centers, atol=1e-4):
-                break
-            centers = new_centers
-        return centers
-
-    def _compute_H(self, X):
-        """Calcula matriz de ativacao H de forma vetorizada."""
-        N = X.shape[0]
-        H = np.zeros((N, self.n_centers))
-        for j in range(self.n_centers):
-            diff = X - self.centers[j]  # (N, p)
-            dist_sq = np.sum(diff ** 2, axis=1)  # (N,)
-            H[:, j] = np.exp(-dist_sq / (2 * self.sigmas[j] ** 2 + 1e-10))
-        return H
-
-    def fit(self, X, Y):
-        """X: (N, p) SEM bias, Y: (N, C)."""
-        N = X.shape[0]
-
-        # K-Means
-        self.centers = self._kmeans(X, self.n_centers)
-
-        # Sigma: media das distancias aos 2 centros mais proximos
-        dists_c = np.zeros((self.n_centers, self.n_centers))
-        for i in range(self.n_centers):
-            for j in range(self.n_centers):
-                dists_c[i, j] = np.sqrt(np.sum((self.centers[i] - self.centers[j]) ** 2))
-        np.fill_diagonal(dists_c, np.inf)
-        self.sigmas = np.zeros(self.n_centers)
-        for j in range(self.n_centers):
-            k_nn = min(2, self.n_centers - 1)
-            self.sigmas[j] = np.mean(np.sort(dists_c[j])[:k_nn])
-        self.sigmas[self.sigmas == 0] = 1.0
-
-        # Camada oculta
-        H = self._compute_H(X)
-        H_bias = np.hstack([H, np.ones((N, 1))])
-
-        # Pseudo-inversa para pesos iniciais
-        self.weights = np.linalg.pinv(H_bias) @ Y
-
-        y_pred = H_bias @ self.weights
-        initial_error = np.sum((Y - y_pred) ** 2) / (2 * N)
-        self.errors_per_epoch = [initial_error]
-
-        # Refinamento com gradiente (batch)
-        for epoch in range(self.max_epochs):
-            output = H_bias @ self.weights  # (N, C)
-            error = Y - output
-            eqm = np.sum(error ** 2) / (2 * N)
-            self.errors_per_epoch.append(eqm)
-
-            # Batch gradient update
-            grad = -(H_bias.T @ error) / N  # (n_centers+1, C)
-            self.weights -= self.lr * grad
-
-            if abs(self.errors_per_epoch[-1] - self.errors_per_epoch[-2]) < self.tol:
-                break
-
-    def predict(self, X):
-        H = self._compute_H(X)
-        H_bias = np.hstack([H, np.ones((X.shape[0], 1))])
-        output = H_bias @ self.weights
-        return np.argmax(output, axis=1)
-
 
 # ==============================================================================
 # 5. VALIDACAO MONTE CARLO
@@ -382,7 +290,6 @@ model_configs = {
     'ADALINE':            lambda: ADALINE(lr=0.001, max_epochs=50, tol=1e-6),
     'MLP':                lambda: MLP(hidden_layers=(100, 50), lr=0.01, max_epochs=100,
                                       activation='tanh', batch_size=64),
-    'RBF':                lambda: RBF(n_centers=40, lr=0.01, max_epochs=50),
 }
 
 R_total = 100
